@@ -15,34 +15,6 @@ default_args = {
     'retry_delay': timedelta(minutes=5)
 }
 
-def upload_to_s3(**context) -> None:
-    execution_date = context['execution_date']
-    date_str = execution_date.strftime('%Y%m%d')
-    filename = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
-    key = f"popular_movies_{date_str}.csv"
-    
-    hook = S3Hook('aws_conn')
-    hook.load_file(
-        filename=filename,
-        key=key,
-        bucket_name="popularmoviesetl",
-        replace=True
-    )
-
-def write_to_csv(**context) -> None:
-    task_instance = context['task_instance']
-    execution_date = context['execution_date']
-    clean_data: list[dict[str, str]] = task_instance.xcom_pull(task_ids="clean_data_tsk")
-    if not clean_data:
-        raise ValueError("No data retrieved from XCom")
-    
-    date_str = execution_date.strftime('%Y%m%d')
-    csv_file_path = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
-
-    with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=['Title', 'Overview', 'Release_Date'])
-        writer.writeheader()
-        writer.writerows(clean_data)
 
 def clean_data(**context) -> list[dict[str, str]]:
     task_instance = context['task_instance']
@@ -63,6 +35,38 @@ def clean_data(**context) -> list[dict[str, str]]:
     
     return fetched_data
 
+
+def write_to_csv(**context) -> None:
+    task_instance = context['task_instance']
+    execution_date = context['execution_date']
+    clean_data: list[dict[str, str]] = task_instance.xcom_pull(task_ids="clean_data_tsk")
+    if not clean_data:
+        raise ValueError("No data retrieved from XCom")
+    
+    date_str = execution_date.strftime('%Y%m%d')
+    csv_file_path = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
+
+    with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=['Title', 'Overview', 'Release_Date'])
+        writer.writeheader()
+        writer.writerows(clean_data)
+
+
+def upload_to_s3(**context) -> None:
+    execution_date = context['execution_date']
+    date_str = execution_date.strftime('%Y%m%d')
+    filename = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
+    key = f"popular_movies_{date_str}.csv"
+    
+    hook = S3Hook('aws_conn')
+    hook.load_file(
+        filename=filename,
+        key=key,
+        bucket_name="popularmoviesetl",
+        replace=True
+    )
+
+    
 with DAG(dag_id="fetch_trending_movies", start_date=datetime(2024, 7, 21), 
          schedule_interval="@daily", default_args=default_args, catchup=False) as dag:
     
