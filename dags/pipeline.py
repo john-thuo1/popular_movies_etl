@@ -15,7 +15,8 @@ default_args = {
     'retry_delay': timedelta(minutes=5)
 }
 
-def upload_to_s3(execution_date) -> None:
+def upload_to_s3(**context) -> None:
+    execution_date = context['execution_date']
     date_str = execution_date.strftime('%Y%m%d')
     filename = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
     key = f"popular_movies_{date_str}.csv"
@@ -28,7 +29,9 @@ def upload_to_s3(execution_date) -> None:
         replace=True
     )
 
-def write_to_csv(task_instance, execution_date) -> None:
+def write_to_csv(**context) -> None:
+    task_instance = context['task_instance']
+    execution_date = context['execution_date']
     clean_data: list[dict[str, str]] = task_instance.xcom_pull(task_ids="clean_data_tsk")
     if not clean_data:
         raise ValueError("No data retrieved from XCom")
@@ -41,7 +44,8 @@ def write_to_csv(task_instance, execution_date) -> None:
         writer.writeheader()
         writer.writerows(clean_data)
 
-def clean_data(task_instance: any) -> list[dict[str, str]]:
+def clean_data(**context) -> list[dict[str, str]]:
+    task_instance = context['task_instance']
     response: dict[str, any] = task_instance.xcom_pull(task_ids="fetch_trending")
     if not response or 'results' not in response:
         raise ValueError("No valid data fetched from the API")
@@ -59,7 +63,7 @@ def clean_data(task_instance: any) -> list[dict[str, str]]:
     
     return fetched_data
 
-with DAG(dag_id="fetch_trending_movies", start_date=datetime(2024, 7, 18), 
+with DAG(dag_id="fetch_trending_movies", start_date=datetime(2024, 7, 21), 
          schedule_interval="@daily", default_args=default_args, catchup=False) as dag:
     
     fetch_movies_task = SimpleHttpOperator(
@@ -81,15 +85,13 @@ with DAG(dag_id="fetch_trending_movies", start_date=datetime(2024, 7, 18),
     save_csv_file = PythonOperator(
         task_id="save_data",
         python_callable=write_to_csv,
-        provide_context=True,
-        op_args=['{{ execution_date }}']
+        provide_context=True
     )
 
     load_to_aws = PythonOperator(
         task_id="load_csv_file",
         python_callable=upload_to_s3,
-        provide_context=True,
-        op_args=['{{ execution_date }}']
+        provide_context=True
     )
 
     fetch_movies_task >> clean_data_fetched >> save_csv_file >> load_to_aws
