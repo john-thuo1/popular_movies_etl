@@ -6,7 +6,6 @@ from airflow.hooks.S3_hook import S3Hook # type: ignore
 
 import csv
 
-
 default_args = {
     'owner': 'john',
     'depends_on_past': False,
@@ -16,28 +15,31 @@ default_args = {
     'retry_delay': timedelta(minutes=5)
 }
 
-def upload_to_s3() -> None:
+def upload_to_s3(execution_date) -> None:
+    date_str = execution_date.strftime('%Y%m%d')
+    filename = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
+    key = f"popular_movies_{date_str}.csv"
+    
     hook = S3Hook('aws_conn')
     hook.load_file(
-        filename="/opt/airflow/Data/popular_movies.csv",
-        key="popular_movies.csv",
+        filename=filename,
+        key=key,
         bucket_name="popularmoviesetl",
         replace=True
     )
 
-
-def write_to_csv(task_instance: any) -> None:
+def write_to_csv(task_instance, execution_date) -> None:
     clean_data: list[dict[str, str]] = task_instance.xcom_pull(task_ids="clean_data_tsk")
     if not clean_data:
         raise ValueError("No data retrieved from XCom")
     
-    csv_file_path = "/opt/airflow/Data/popular_movies.csv"
+    date_str = execution_date.strftime('%Y%m%d')
+    csv_file_path = f"/opt/airflow/Data/popular_movies_{date_str}.csv"
 
     with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=['Title', 'Overview', 'Release_Date'])
         writer.writeheader()
         writer.writerows(clean_data)
-
 
 def clean_data(task_instance: any) -> list[dict[str, str]]:
     response: dict[str, any] = task_instance.xcom_pull(task_ids="fetch_trending")
@@ -56,7 +58,6 @@ def clean_data(task_instance: any) -> list[dict[str, str]]:
         })
     
     return fetched_data
-
 
 with DAG(dag_id="fetch_trending_movies", start_date=datetime(2024, 7, 18), 
          schedule_interval="@daily", default_args=default_args, catchup=False) as dag:
@@ -80,12 +81,15 @@ with DAG(dag_id="fetch_trending_movies", start_date=datetime(2024, 7, 18),
     save_csv_file = PythonOperator(
         task_id="save_data",
         python_callable=write_to_csv,
-        provide_context=True
+        provide_context=True,
+        op_args=['{{ execution_date }}']
     )
 
     load_to_aws = PythonOperator(
         task_id="load_csv_file",
         python_callable=upload_to_s3,
+        provide_context=True,
+        op_args=['{{ execution_date }}']
     )
 
     fetch_movies_task >> clean_data_fetched >> save_csv_file >> load_to_aws
