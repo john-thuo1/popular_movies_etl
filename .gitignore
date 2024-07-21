@@ -1,0 +1,6 @@
+logs
+dags/__pycache__
+open_weather
+plugins
+.env
+commands.txt
